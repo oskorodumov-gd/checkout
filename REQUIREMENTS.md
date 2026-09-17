@@ -180,3 +180,60 @@ The baseline is accepted only when all of the following are true:
 - Requirements not explicitly superseded remain in force.
 - Any proposed change to `src/lib/pricing.ts` must pause before editing and obtain explicit human approval.
 - The training-specific floating-point representation must remain unchanged unless a later requirement explicitly replaces it.
+
+## 13. Requirements Update 1
+
+This update replaces only the baseline's persistence rule:
+
+- Orders are persisted in `data/orders.json`.
+- No database dependency is allowed.
+- Money remains floating-point dollars.
+- All other baseline requirements still apply, including the cart request contract, the `userId` sourcing rule, and the pricing-stub protection.
+
+`POST /api/checkout` must append each order to `data/orders.json` using Node's file-system APIs. Create the file with an empty array if it does not exist. A valid request must return HTTP 200 with JSON in the shape `{ "id": string, "total": number }`, where `id` is the new order ID and `total` is the server-calculated total. This response requirement supersedes CHK-04 only with respect to adding the `id` field; all other checkout calculation and response requirements remain in force.
+
+`GET /api/orders` returns the current contents of `data/orders.json` as a JSON array.
+
+Each order uses this shape:
+
+```json
+{
+  "id": "...",
+  "userId": "...",
+  "items": [],
+  "subtotal": 0,
+  "discount": 0,
+  "total": 0,
+  "status": "...",
+  "createdAt": "ISO-8601"
+}
+```
+
+Each item uses this shape:
+
+```json
+{
+  "productId": "...",
+  "name": "...",
+  "quantity": 0,
+  "unitPrice": 0
+}
+```
+
+- `userId` on the persisted order is copied from the cart request body's `userId` field (see the API Contract above). There is still no authentication.
+- `status` is always the string `"completed"` throughout this course. No cancellation, refund, or fulfillment workflow exists yet, so no other status value should appear.
+- Money is still represented as floating-point dollars.
+- The order routes run in the Node.js runtime, not an Edge runtime.
+- If `data/orders.json` contains malformed JSON, return HTTP 500 with a safe error message; do not overwrite or silently discard its contents.
+- In this disposable training repository, `data/orders.json` may contain only course-generated synthetic orders. Never add real customer data.
+- JSON-file writes are a single-process training solution—concurrent writes are not guaranteed safe. Document this limitation in `README.md` rather than adding a database or external service.
+
+### 13.1 Persistence Testing and Acceptance
+
+- Tests must verify that a valid checkout persists one order with the required order and item shapes and returns that order's ID and total.
+- Tests must verify that multiple successful checkouts append orders without replacing previously persisted orders.
+- Tests must verify that `GET /api/orders` returns all currently persisted orders as a JSON array.
+- Tests must verify that a missing `data/orders.json` file is initialized with an empty JSON array before the first order is appended.
+- Tests must verify that malformed JSON in `data/orders.json` causes the order routes to return HTTP 500 with a safe error message and that the malformed file is not modified.
+- Tests must verify that each persisted order copies `userId` from the request, uses catalogue-derived item names and unit prices, records the calculated subtotal, discount, and total, has status `"completed"`, and has a valid ISO-8601 `createdAt` value.
+- Persistence tests must use only synthetic data and must isolate their file state so they do not depend on or permanently alter the repository's `data/orders.json` contents.

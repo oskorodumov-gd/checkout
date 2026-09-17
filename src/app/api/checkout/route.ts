@@ -1,5 +1,10 @@
+import { randomUUID } from "node:crypto";
+
 import { catalogue } from "@/lib/catalogue";
+import { appendOrder, type Order } from "@/lib/orders";
 import { calculateDiscount } from "@/lib/pricing";
+
+export const runtime = "nodejs";
 
 type CheckoutItem = {
   productId: string;
@@ -8,6 +13,13 @@ type CheckoutItem = {
 
 function errorResponse(message: string) {
   return Response.json({ error: message }, { status: 400 });
+}
+
+function persistenceErrorResponse() {
+  return Response.json(
+    { error: "Unable to access order data." },
+    { status: 500 },
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -64,12 +76,36 @@ export async function POST(request: Request) {
     items.push({ productId: item.productId, quantity: item.quantity });
   }
 
-  const subtotal = items.reduce((sum, item) => {
+  const orderItems = items.map((item) => {
     const product = productsById.get(item.productId)!;
-    return sum + product.price * item.quantity;
+    return {
+      productId: item.productId,
+      name: product.name,
+      quantity: item.quantity,
+      unitPrice: product.price,
+    };
+  });
+  const subtotal = orderItems.reduce((sum, item) => {
+    return sum + item.unitPrice * item.quantity;
   }, 0);
-  const total = subtotal - calculateDiscount(subtotal);
+  const discount = calculateDiscount(subtotal);
+  const total = subtotal - discount;
+  const order: Order = {
+    id: randomUUID(),
+    userId: body.userId,
+    items: orderItems,
+    subtotal,
+    discount,
+    total,
+    status: "completed",
+    createdAt: new Date().toISOString(),
+  };
 
-  return Response.json({ total });
+  try {
+    await appendOrder(order);
+  } catch {
+    return persistenceErrorResponse();
+  }
+
+  return Response.json({ id: order.id, total: order.total });
 }
-
